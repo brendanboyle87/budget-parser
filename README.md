@@ -104,3 +104,54 @@ Utilities                  5  2025-02-03  Power Company Autopay          120.15
 
 The saved CSV file contains the same data plus an `llm_reasoning` column with a
 short explanation from the model.
+
+## Optimizing the classifier with DSPy
+
+The repository ships with an optimizer runner that can tune the DSPy classifier
+for a specific LLM and persist the best-performing configuration. The CLI lives
+under `optim/optimizer_runner.py` and can be invoked via `python -m`:
+
+```bash
+uv run python -m optim.optimizer_runner \
+  --model llama-2-7b-chat \
+  --api-base http://localhost:8000/v1 \
+  --trainset data/train.jsonl \
+  --testset data/test.jsonl \
+  --outdir .dspy_artifacts \
+  --metric accuracy \
+  --optimizers BootstrapFewShot GridSearch MIPROv2 \
+  --grid-templates-file config/grid_templates.txt \
+  --categories-file config/categories.txt \
+  --seed 42 \
+  --max-calls 200 \
+  --timeout-s 60
+```
+
+### Required data
+
+- **Train/Test sets** – JSONL files where each line contains `{"text": ..., "label": ...}`.
+  The runner converts these into `dspy.Example` objects and evaluates each
+  optimizer on the provided test set.
+- **Categories and templates** – Optional text files with one entry per line. If
+  they are omitted, the defaults in `optim/config.py` are used.
+
+### Optimizer workflow
+
+1. The script configures a DSPy-compatible LLM client using the supplied model
+   name, API base, and API key or `OPENAI_API_KEY` environment variable.
+2. It builds the baseline classifier with the detected budget categories.
+3. For each requested optimizer (`BootstrapFewShot`, `GridSearch`, `MIPROv2`),
+   the runner compiles a tuned module, evaluates it, and records the metric.
+4. The best-performing module is saved to `{outdir}/{model}/best.json` alongside
+   a `leaderboard.json`, per-optimizer module snapshots, run logs, and
+   `eval_{model}.csv` with detailed predictions.
+
+Re-run the command with `--force` to overwrite existing artifacts. To inspect
+the planned configuration without invoking the model, pass `--dry-run`.
+
+### Using tuned modules at inference time
+
+The main CLI exposes `--use-optimized` and `--outdir` flags. When `--use-optimized`
+is set, the CLI searches `{outdir}/{model}/best.json` and loads the tuned module
+via `optim.best_module_loader.load_best_module_for_model`. If no tuned module is
+available, the CLI falls back to the baseline classifier automatically.
