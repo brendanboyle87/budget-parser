@@ -104,3 +104,82 @@ Utilities                  5  2025-02-03  Power Company Autopay          120.15
 
 The saved CSV file contains the same data plus an `llm_reasoning` column with a
 short explanation from the model.
+
+# Optimizing the classifier with DSPy
+
+The repository ships with an optimizer runner that can tune the DSPy classifier
+for a specific LLM and persist the best-performing configuration. The CLI lives
+under `optim/optimizer_runner.py` and can be invoked via `python -m`.
+
+### 1. Prepare tuning datasets
+
+Create train and test JSONL files where each line contains both the transaction
+text and the desired label:
+
+```jsonl
+{"text": "Bought lunch at McDonald's", "label": "food"}
+{"text": "Monthly metro pass", "label": "transportation"}
+```
+
+Only lines with both keys are accepted; invalid rows are skipped with a warning
+in the run log. You can export data from prior classifications or craft a small
+hand-labeled sample to bootstrap the tuning process.
+
+### 2. (Optional) Customize categories and templates
+
+Pass `--categories-file` and/or `--grid-templates-file` with one entry per line
+to override the defaults from `optim/config.py`. When omitted, the defaults are
+used automatically.
+
+### 3. Run the optimizer suite
+
+Invoke the runner with your model name, API endpoint, datasets, and any
+optimizer-specific options:
+
+```bash
+uv run python -m optim.optimizer_runner \
+  --model llama-2-7b-chat \
+  --api-base http://localhost:8000/v1 \
+  --trainset data/train.jsonl \
+  --testset data/test.jsonl \
+  --outdir .dspy_artifacts \
+  --metric accuracy \
+  --optimizers BootstrapFewShot GridSearch MIPROv2 \
+  --grid-templates-file config/grid_templates.txt \
+  --categories-file config/categories.txt \
+  --seed 42 \
+  --max-calls 200 \
+  --timeout-s 60
+```
+
+Use `--dry-run` to print the planned configuration without calling the model and
+`--force` to overwrite existing artifacts for a given model.
+
+### 4. Inspect generated artifacts
+
+Artifacts are written to `{outdir}/{model}/` (defaults to
+`.dspy_artifacts/{model}/`) and include:
+
+- `best.json` – the tuned DSPy module for the winning optimizer.
+- `leaderboard.json` – metrics for each optimizer and the chosen winner.
+- `eval_{model}.csv` – per-example predictions from the winning module.
+- `run.log` – optimizer progress, warnings, and timing information.
+- `*_module.json` – optional snapshots of individual optimizers when enabled.
+
+### 5. Use the tuned module in the main CLI
+
+Run the primary classifier with `--use-optimized` to automatically swap in the
+best module for the requested model (if present):
+
+```bash
+uv run budget-parser classify \
+  --budgets budgets.json \
+  --transactions transactions.csv \
+  --model llama-2-7b-chat \
+  --api-base http://localhost:8000/v1 \
+  --use-optimized \
+  --outdir .dspy_artifacts
+```
+
+If `{outdir}/{model}/best.json` does not exist the CLI logs a notice and falls
+back to the baseline classifier without interrupting the run.
