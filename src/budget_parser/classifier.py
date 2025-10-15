@@ -7,7 +7,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, MutableMapping, Optional
+from typing import Any, Iterable, Mapping, MutableMapping, Optional, Sequence, Union
 
 import dspy
 
@@ -164,6 +164,26 @@ class TransactionClassifier(dspy.Module):
 
         numeric_int = int(round(numeric))
         return max(1, min(5, numeric_int))
+
+
+def make_classifier(
+    categories: Union[Mapping[str, Optional[float]], Sequence[str]]
+) -> "TransactionClassifier":
+    """Create a :class:`TransactionClassifier` from category data.
+
+    The caller may provide either a mapping of category name to monthly limit or a
+    sequence of category names. When limits are not supplied, ``None`` is used so the
+    classifier treats them as unbounded.
+    """
+
+    if isinstance(categories, Mapping):
+        mapping: MutableMapping[str, Optional[float]] = {
+            str(name): _coerce_limit(limit) for name, limit in categories.items()
+        }
+    else:
+        mapping = {str(name): None for name in categories}
+
+    return TransactionClassifier(mapping)
 
 
 def _load_category_list(items: Iterable[Any]) -> MutableMapping[str, Optional[float]]:
