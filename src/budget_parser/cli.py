@@ -15,7 +15,14 @@ from tqdm import tqdm
 
 import dspy
 
-from .classifier import ClassificationResult, TransactionClassifier, load_budget_categories
+from optim.best_module_loader import load_best_module_for_model
+from optim.config import ARTIFACTS_ROOT
+
+from .classifier import (
+    ClassificationResult,
+    load_budget_categories,
+    make_classifier,
+)
 
 app = typer.Typer(
     name="budget-parser",
@@ -62,6 +69,18 @@ def classify(
         max=65535,
         help="Port for the language model server when --api-base is not provided.",
     ),
+    outdir: Path = typer.Option(
+        Path(ARTIFACTS_ROOT),
+        "--outdir",
+        dir_okay=True,
+        file_okay=False,
+        help="Directory that stores tuned classifier artifacts.",
+    ),
+    use_optimized: bool = typer.Option(
+        False,
+        "--use-optimized",
+        help="Load the best tuned classifier for the specified model when available.",
+    ),
     show_reasoning: bool = typer.Option(
         False,
         "--show-reasoning",
@@ -83,7 +102,14 @@ def classify(
     lm = dspy.OpenAI(model=model, api_key=api_key or "", api_base=api_base_url)
     dspy.settings.configure(lm=lm)
 
-    classifier = TransactionClassifier(categories)
+    classifier = make_classifier(categories)
+
+    if use_optimized:
+        classifier = load_best_module_for_model(
+            model=model,
+            outdir=str(outdir),
+            fallback_module=classifier,
+        )
 
     results: list[ClassificationResult] = []
     for _, row in tqdm(
